@@ -1,0 +1,26 @@
+# 매일 수집만 해요. 판정·등급·대시보드는 Mac에서 (클라우드수집-설계안.md)
+name: collect
+on:
+  schedule: [{cron: "0 22 * * *"}]   # UTC 22:00 = 한국 07:00
+  workflow_dispatch: {}              # 저장소 Actions 화면의 수동 실행 버튼
+permissions: {contents: write}
+concurrency: collect
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Seoul                 # 월요일 판단·날짜 계산을 한국 시간으로
+      NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+      NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+      DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+      SEOUL_OPENAPI_KEY: ${{ secrets.SEOUL_OPENAPI_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 run/collect.py "${{ github.event_name == 'workflow_dispatch' && 'monday' || '' }}"
+      - run: |
+          git config user.name radar-bot
+          git config user.email radar-bot@users.noreply.github.com
+          git add run/raw-*.json
+          git commit -m "collect $(date +%F\ %H:%M)"
+          git pull --rebase && git push
