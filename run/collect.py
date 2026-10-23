@@ -37,6 +37,9 @@ KW = [
 MODE = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ("daily", "monday") else ("monday" if TODAY.weekday() == 0 else "daily")
 if MODE == "daily": KW = [k for k in KW if k[2] == "빠른"]
 raw, runlog = [], []
+ONLY = [x for x in os.environ.get("ONLY_BOARDS", "").split(",") if x]   # Mac 보충: 해외에서 막힌 게시판만 읽기
+SKIP = [x for x in os.environ.get("SKIP_BOARDS", "").split(",") if x]   # Actions: 해외에서 막힌 게시판 건너뛰기
+if ONLY: KW, MODE = [], "보충"
 def keep_title(t, must, ex): return re.search(must, t) and not any(x in t for x in BASE_EX + ex.split())
 for q, ch, track, cat, must, ex in KW:
     days = 2 if track == "빠른" else 8
@@ -51,72 +54,73 @@ for q, ch, track, cat, must, ex in KW:
         if (NOW - d).days < days and keep_title(t, must, ex):
             raw.append(dict(source="N1" if ch == "news" else "N2", channel=ch, keyword=q, track=track, cat_hint=cat, title=t, desc=strip(i["description"])[:160], url=i.get("originallink") or i["link"], date=d.date().isoformat())); n += 1
     runlog.append(dict(source="N1" if ch == "news" else "N2", key=q, ok=True, kept=n)); time.sleep(0.12)
-# A1 TourAPI 국문 축제 (법정동 시도: 서울11·부산26·인천28·경기41·제주50), 8주 안 시작
-try:
-    p = urllib.parse.urlencode({"serviceKey": ENV["DATA_GO_KR_KEY"], "MobileOS": "ETC", "MobileApp": "TheWeek", "_type": "json", "eventStartDate": TODAY.strftime("%Y%m%d"), "numOfRows": 300, "pageNo": 1})
-    its = json.loads(get(f"https://apis.data.go.kr/B551011/KorService2/searchFestival2?{p}"))["response"]["body"]["items"]["item"]
-    end = TODAY + dt.timedelta(days=56); n = 0
-    for i in its:
-        s = i.get("eventstartdate", "")
-        if i.get("lDongRegnCd") in ("11", "26", "28", "41", "50") and s and dt.date(int(s[:4]), int(s[4:6]), int(s[6:8])) <= end:
-            raw.append(dict(source="A1", channel="api", keyword="축제", track="빠른", cat_hint="③ 페스티벌", title=i["title"], desc=f"{s}~{i.get('eventenddate','')} · {i.get('addr1','')}", url="", date=s)); n += 1
-    runlog.append(dict(source="A1", key="searchFestival2", ok=True, kept=n))
-except Exception as e: runlog.append(dict(source="A1", key="searchFestival2", ok=False, err=type(e).__name__))
-# A2 서울 문화행사: 8주 안 시작, 축제·콘서트 + 4-5 무료 필터
-try:
-    rows = []
-    for a, b in [(1, 1000), (1001, 2000)]:
-        rows += json.loads(get(f"http://openapi.seoul.go.kr:8088/{urllib.parse.quote(ENV['SEOUL_OPENAPI_KEY'])}/json/culturalEventInfo/{a}/{b}/"))["culturalEventInfo"]["row"]
-    end = TODAY + dt.timedelta(days=56); n = 0
-    small = re.compile("정기연주회|합창단|전수발표회|교육|강좌|수업")
-    for r in rows:
-        try: s = dt.date.fromisoformat(r["STRTDATE"][:10])
-        except Exception: continue
-        if not (TODAY <= s <= end): continue
-        code, free = r["CODENAME"], r["IS_FREE"] == "무료"
-        if not (code.startswith("축제") or code in ("콘서트", "국악", "클래식")) or small.search(r["TITLE"]): continue
-        if code in ("국악", "클래식") and not free: continue
-        raw.append(dict(source="A2", channel="api", keyword=code, track="빠른", cat_hint="② 이벤트·시즌" if code.startswith("축제") else "① 콘서트·공연", title=r["TITLE"], desc=f"{r['DATE']} · {r['PLACE']} · {r['GUNAME']} · {r['ORG_NAME']} · {'무료' if free else '유료'}", url=r.get("HMPG_ADDR") or r.get("ORG_LINK") or "", date=s.isoformat(), free=free)); n += 1
-    runlog.append(dict(source="A2", key="culturalEventInfo", ok=True, kept=n))
-except Exception as e: runlog.append(dict(source="A2", key="culturalEventInfo", ok=False, err=type(e).__name__))
-# C1 인스파이어 공연 JSON
-try:
-    d = json.loads(get("https://www.inspireresorts.com/api/v1/entertainment/inspire-arena/performances?language=ko"))
-    open("run/_inspire_sample.json", "w").write(json.dumps(d, ensure_ascii=False)[:3000])
-    def walk(o):
-        if isinstance(o, dict):
-            if any(k in o for k in ("title", "name")) and any("date" in k.lower() for k in o): yield o
-            for v in o.values(): yield from walk(v)
-        elif isinstance(o, list):
-            for v in o: yield from walk(v)
-    n = 0
-    for o in walk(d):
-        t = strip(str(o.get("title") or o.get("name")))
-        dates = " ".join(str(v) for k, v in o.items() if "date" in k.lower())
-        raw.append(dict(source="C1", channel="api", keyword="인스파이어 공연", track="빠른", cat_hint="① 콘서트·공연", title=t, desc=dates[:120], url="https://www.inspireresorts.com/ko/entertainment", date=dates[:10])); n += 1
-    runlog.append(dict(source="C1", key="performances", ok=True, kept=n))
-except Exception as e: runlog.append(dict(source="C1", key="performances", ok=False, err=type(e).__name__))
-# RSS: D1 연합뉴스 문화, D2 여행신문·트래비, H1 서울시 교통
-BROAD = re.compile("축제|공연|콘서트|팝업|개막|오픈|관광|외국인|전시|페스티벌|개장|행사|교통카드|환승|노선|요금|기후동행|지하철|버스|면세|환급")
-for sid, url, cat, days in [("D1", "https://www.yna.co.kr/rss/culture.xml", "", 2), ("D2", "https://www.traveltimes.co.kr/rss/allArticle.xml", "", 2),
-                             ("D2", "https://www.travie.com/rss/allArticle.xml", "", 2), ("H1", "https://news.seoul.go.kr/traffic/feed", "⑥ 정책·제도", 8)]:
+if not ONLY:   # 보충 모드에서는 게시판만 읽어요
+    # A1 TourAPI 국문 축제 (법정동 시도: 서울11·부산26·인천28·경기41·제주50), 8주 안 시작
     try:
-        root = ET.fromstring(get(url)); n = 0
-        for it in root.iter("item"):
-            t = strip(it.findtext("title")); pd = it.findtext("pubDate") or ""
-            try: d = email.utils.parsedate_to_datetime(pd)
-            except Exception: d = NOW
-            if d.tzinfo is None: d = d.replace(tzinfo=dt.timezone.utc)
-            if (NOW - d).days < days and (cat or BROAD.search(t)) and not any(x in t for x in BASE_EX):
-                raw.append(dict(source=sid, channel="rss", keyword="RSS", track="빠른", cat_hint=cat, title=t, desc=strip(it.findtext("description"))[:160], url=it.findtext("link") or "", date=d.date().isoformat())); n += 1
-        runlog.append(dict(source=sid, key=url, ok=True, kept=n))
-    except Exception as e: runlog.append(dict(source=sid, key=url, ok=False, err=type(e).__name__))
+        p = urllib.parse.urlencode({"serviceKey": ENV["DATA_GO_KR_KEY"], "MobileOS": "ETC", "MobileApp": "TheWeek", "_type": "json", "eventStartDate": TODAY.strftime("%Y%m%d"), "numOfRows": 300, "pageNo": 1})
+        its = json.loads(get(f"https://apis.data.go.kr/B551011/KorService2/searchFestival2?{p}"))["response"]["body"]["items"]["item"]
+        end = TODAY + dt.timedelta(days=56); n = 0
+        for i in its:
+            s = i.get("eventstartdate", "")
+            if i.get("lDongRegnCd") in ("11", "26", "28", "41", "50") and s and dt.date(int(s[:4]), int(s[4:6]), int(s[6:8])) <= end:
+                raw.append(dict(source="A1", channel="api", keyword="축제", track="빠른", cat_hint="③ 페스티벌", title=i["title"], desc=f"{s}~{i.get('eventenddate','')} · {i.get('addr1','')}", url="", date=s)); n += 1
+        runlog.append(dict(source="A1", key="searchFestival2", ok=True, kept=n))
+    except Exception as e: runlog.append(dict(source="A1", key="searchFestival2", ok=False, err=type(e).__name__))
+    # A2 서울 문화행사: 8주 안 시작, 축제·콘서트 + 4-5 무료 필터
+    try:
+        rows = []
+        for a, b in [(1, 1000), (1001, 2000)]:
+            rows += json.loads(get(f"http://openapi.seoul.go.kr:8088/{urllib.parse.quote(ENV['SEOUL_OPENAPI_KEY'])}/json/culturalEventInfo/{a}/{b}/"))["culturalEventInfo"]["row"]
+        end = TODAY + dt.timedelta(days=56); n = 0
+        small = re.compile("정기연주회|합창단|전수발표회|교육|강좌|수업")
+        for r in rows:
+            try: s = dt.date.fromisoformat(r["STRTDATE"][:10])
+            except Exception: continue
+            if not (TODAY <= s <= end): continue
+            code, free = r["CODENAME"], r["IS_FREE"] == "무료"
+            if not (code.startswith("축제") or code in ("콘서트", "국악", "클래식")) or small.search(r["TITLE"]): continue
+            if code in ("국악", "클래식") and not free: continue
+            raw.append(dict(source="A2", channel="api", keyword=code, track="빠른", cat_hint="② 이벤트·시즌" if code.startswith("축제") else "① 콘서트·공연", title=r["TITLE"], desc=f"{r['DATE']} · {r['PLACE']} · {r['GUNAME']} · {r['ORG_NAME']} · {'무료' if free else '유료'}", url=r.get("HMPG_ADDR") or r.get("ORG_LINK") or "", date=s.isoformat(), free=free)); n += 1
+        runlog.append(dict(source="A2", key="culturalEventInfo", ok=True, kept=n))
+    except Exception as e: runlog.append(dict(source="A2", key="culturalEventInfo", ok=False, err=type(e).__name__))
+    # C1 인스파이어 공연 JSON
+    try:
+        d = json.loads(get("https://www.inspireresorts.com/api/v1/entertainment/inspire-arena/performances?language=ko"))
+        open("run/_inspire_sample.json", "w").write(json.dumps(d, ensure_ascii=False)[:3000])
+        def walk(o):
+            if isinstance(o, dict):
+                if any(k in o for k in ("title", "name")) and any("date" in k.lower() for k in o): yield o
+                for v in o.values(): yield from walk(v)
+            elif isinstance(o, list):
+                for v in o: yield from walk(v)
+        n = 0
+        for o in walk(d):
+            t = strip(str(o.get("title") or o.get("name")))
+            dates = " ".join(str(v) for k, v in o.items() if "date" in k.lower())
+            raw.append(dict(source="C1", channel="api", keyword="인스파이어 공연", track="빠른", cat_hint="① 콘서트·공연", title=t, desc=dates[:120], url="https://www.inspireresorts.com/ko/entertainment", date=dates[:10])); n += 1
+        runlog.append(dict(source="C1", key="performances", ok=True, kept=n))
+    except Exception as e: runlog.append(dict(source="C1", key="performances", ok=False, err=type(e).__name__))
+    # RSS: D1 연합뉴스 문화, D2 여행신문·트래비, H1 서울시 교통
+    BROAD = re.compile("축제|공연|콘서트|팝업|개막|오픈|관광|외국인|전시|페스티벌|개장|행사|교통카드|환승|노선|요금|기후동행|지하철|버스|면세|환급")
+    for sid, url, cat, days in [("D1", "https://www.yna.co.kr/rss/culture.xml", "", 2), ("D2", "https://www.traveltimes.co.kr/rss/allArticle.xml", "", 2),
+                                 ("D2", "https://www.travie.com/rss/allArticle.xml", "", 2), ("H1", "https://news.seoul.go.kr/traffic/feed", "⑥ 정책·제도", 8)]:
+        try:
+            root = ET.fromstring(get(url)); n = 0
+            for it in root.iter("item"):
+                t = strip(it.findtext("title")); pd = it.findtext("pubDate") or ""
+                try: d = email.utils.parsedate_to_datetime(pd)
+                except Exception: d = NOW
+                if d.tzinfo is None: d = d.replace(tzinfo=dt.timezone.utc)
+                if (NOW - d).days < days and (cat or BROAD.search(t)) and not any(x in t for x in BASE_EX):
+                    raw.append(dict(source=sid, channel="rss", keyword="RSS", track="빠른", cat_hint=cat, title=t, desc=strip(it.findtext("description"))[:160], url=it.findtext("link") or "", date=d.date().isoformat())); n += 1
+            runlog.append(dict(source=sid, key=url, ok=True, kept=n))
+        except Exception as e: runlog.append(dict(source=sid, key=url, ok=False, err=type(e).__name__))
 # 게시판형 수집처 (정책·교통) — run/boards.py
-import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import boards
 CAT = {"C4": "① 콘서트·공연", "C2": "① 콘서트·공연", "C3": "① 콘서트·공연", "C5": "① 콘서트·공연", "A6": "", "A7": "⑥ 정책·제도", "B1": "⑥ 정책·제도", "B2": "⑥ 정책·제도", "H2": "⑥ 정책·제도", "H3": "⑥ 정책·제도", "H4": "⑥ 정책·제도"}
 for b in boards.BOARDS:
+    if (ONLY and b[1] not in ONLY) or b[1] in SKIP: continue
     try:
         r = boards.read_board(*b)
         for i in r["kept"]:

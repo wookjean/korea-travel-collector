@@ -11,6 +11,7 @@ jobs:
     timeout-minutes: 15
     env:
       TZ: Asia/Seoul                 # 월요일 판단·날짜 계산을 한국 시간으로
+      SKIP_BOARDS: 멜론티켓 오픈 공지   # 해외 접속 차단(423) → Mac에서 보충
       NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
       NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
       DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
