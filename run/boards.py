@@ -62,10 +62,10 @@ def generic(page, base):
         if best and best[0] not in seen:
             seen.add(best[0]); out.append(dict(title=best[0], date=d.isoformat(), url=best[1]))
     if out: return out
-    # 링크 블록형 (KSPO·SM 뉴스룸): <a href> 안에 제목(h2·h3·strong·img alt)과 날짜
+    # 링크 블록형 (KSPO·SM 뉴스룸·인천공항 웹진형): <a href> 안에 제목(h2·h3·subject·img alt)과 날짜
     for href, body in re.findall(r'<a\s[^>]*?href="([^"#][^"]*)"[^>]*>(.*?)</a>', page, re.S):
-        dm = re.search(r'class="date"[^>]*>(.*?)<', body, re.S)
-        tm = re.search(r'<h[2-4][^>]*>(.*?)</h[2-4]>', body, re.S) or re.search(r'class="title"[^>]*>(.*?)<', body, re.S) or re.search(r'alt="([^"]{6,})"', body)
+        dm = re.search(r'class="date"[^>]*>(.*?)<', body, re.S) or re.search(r'작성일\s*([\d.\-]+)', body)
+        tm = re.search(r'<h[2-4][^>]*>(.*?)</h[2-4]>', body, re.S) or re.search(r'class="(?:title|subject)"[^>]*>(.*?)<', body, re.S) or re.search(r'alt="([^"]{6,})"', body)
         if dm and tm and parse_date(dm.group(1)):
             rng = re.findall(r"20\d{2}[.-]\d{1,2}[.-]\d{1,2}", dm.group(1))
             out.append(dict(title=clean(tm.group(1)), date=parse_date(dm.group(1)).isoformat(),
