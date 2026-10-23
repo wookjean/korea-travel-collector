@@ -64,8 +64,10 @@ def generic(page, base):
     if out: return out
     # 링크 블록형 (KSPO·SM 뉴스룸·인천공항 웹진형): <a href> 안에 제목(h2·h3·subject·img alt)과 날짜
     for href, body in re.findall(r'<a\s[^>]*?href="([^"#][^"]*)"[^>]*>(.*?)</a>', page, re.S):
-        dm = re.search(r'class="date"[^>]*>(.*?)<', body, re.S) or re.search(r'작성일\s*([\d.\-]+)', body)
-        tm = re.search(r'<h[2-4][^>]*>(.*?)</h[2-4]>', body, re.S) or re.search(r'class="(?:title|subject)"[^>]*>(.*?)<', body, re.S) or re.search(r'alt="([^"]{6,})"', body)
+        dm = (re.search(r'class="date"[^>]*>(.*?)<', body, re.S) or re.search(r'기간(?:</strong>)?\s*([\d.]+\s*~\s*[\d.]+)', body)
+              or re.search(r'작성일(?:</strong>)?\s*([\d.\-]+)', body))
+        tm = (re.search(r'<h[2-4][^>]*>(.*?)</h[2-4]>', body, re.S) or re.search(r'class="title"[^>]*>(.*?)<', body, re.S)
+              or re.search(r'class="subject"[^>]*>(?:<span class="processType\d">[^<]*</span>)?(.*?)(?:<span|</strong>)', body, re.S) or re.search(r'alt="([^"]{6,})"', body))
         if dm and tm and parse_date(dm.group(1)):
             rng = re.findall(r"20\d{2}[.-]\d{1,2}[.-]\d{1,2}", dm.group(1))
             out.append(dict(title=clean(tm.group(1)), date=parse_date(dm.group(1)).isoformat(),
@@ -111,6 +113,7 @@ BOARDS = [
     ("A7", "하이코리아 공지", "https://www.hikorea.go.kr/board/BoardNtcListR.pt", "입국|비자|사증|외국인|관광|전자여행", "대행기관|채용|입찰"),
     ("A7", "법무부 보도자료", "https://www.moj.go.kr/moj/221/subview.do", "출입국|비자|무비자|입국|사증|전자여행|외국인 관광", "검찰|교정|소송|범죄|수사"),
     ("B1", "인천공항 공지", "https://www.airport.kr/ap_ko/1011/subview.do", ""),
+    ("B1", "인천공항 이벤트", "https://www.airport.kr/ap_ko/1012/subview.do", "", "당첨자|설문", "schedule"),
     ("B2", "공항철도 공지", "https://www.airportrailroad.com/help/notice", ""),
     ("H2", "티머니 공지", "https://www.tmoney.co.kr/aeb/cmnctn/notice/readNoticeList.dev", "외국인|관광|교통카드|충전|환불|기후동행|요금"),
     ("H2", "티머니 보도자료", "https://www.tmoney.co.kr/aeb/cmnctn/news/readNewsList.dev", "외국인|관광|교통카드|충전|환불|기후동행|요금"),
